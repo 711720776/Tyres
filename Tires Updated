@@ -518,3 +518,149 @@ rownames(mpref) <- colnames(E_Data_c$lgtdata[[1]]$X)
 
 # View the results
 print(round(mpref, digits = 3))
+
+
+
+######computing posterior predictive 'counterfactual' choice probabilities######
+
+Xbeta_M = choiceset %*% t(betaexchange)
+logsumeXbeta_M = log(t(array(colSums(exp(Xbeta_M)), dim = c(dim(Xbeta_M)[2],dim(Xbeta_M)[1]))))
+
+windows()
+smoothScatter(Xbeta_M[1,],Xbeta_M[2,]);grid()
+abline(0,1)
+
+windows()
+smoothScatter(Xbetas[1,],Xbetas[2,]);grid()
+abline(0,1)
+
+## choice probs 
+prob_M=rowMeans(exp(Xbeta_M-logsumeXbeta_M))
+
+#######Mixed Logit (Hierarchical Bayesian) Model with price constraint########
+
+price_index <- which(colnames(E_Data_c$lgtdata[[1]]$X) == "price")
+print(price_index)  # Should return the column index for "price"
+
+#Introducing Price Constraint
+SignRes <- double(ncol(E_Data_c$lgtdata[[1]]$X))  # Initialize with zeros
+SignRes[price_index] <- -1  # Constrain the price coefficient to be negative
+
+
+
+library(bayesm)
+
+out_HB_covariates <- rhierMnlRwMixture(
+  Data = list(
+    lgtdata = E_Data_c$lgtdata,  # All choice data
+    Z = E_Data_c$Z,             # Covariates
+    p = E_Data_c$p              # Number of alternatives per task
+  ),
+  Prior = list(ncomp = 1, SignRes = SignRes),  # Apply sign constraint
+  Mcmc = list(R = 40000, keep = 10)           # 40,000 iterations, thinning every 10
+)
+#Verify Convergence of the Model
+windows()
+plot(out_HB_covariates$loglike, type = "l", main = "Log-Likelihood Over Iterations",
+     xlab = "Iterations", ylab = "Log-Likelihood")
+
+# Set burn-in iteration
+burn_in <- 1800
+
+# Extract converged iterations (from 18,000 onward)
+betadraw_converged <- out_HB_covariates$betadraw[, , (burn_in + 1):dim(out_HB_covariates$betadraw)[3]]
+
+# Check dimensions of the resulting array
+print(dim(betadraw_converged))  # Should return Respondents × Attributes × Iterations
+
+# Extract post burn-in samples
+betadraw_converged <- out_HB_covariates$betadraw[, , (burn_in + 1):dim(out_HB_covariates$betadraw)[3]]
+
+# Posterior means and standard deviations for each respondent and attribute
+posterior_means <- apply(betadraw_converged, c(1, 2), mean)  # Mean across iterations
+posterior_sds <- apply(betadraw_converged, c(1, 2), sd)      # SD across iterations
+
+# Overall attribute-level summaries (averaged across respondents)
+overall_means <- colMeans(posterior_means)
+overall_sds <- apply(posterior_means, 2, sd)
+posterior_summary <- round(cbind(Mean = overall_means, SD = overall_sds), 3)
+
+print(posterior_summary)
+
+#Combine iterations into a single respondent-level array for betaexchange
+betaexchange_c <- array(
+  aperm(betadraw_converged, perm = c(1, 3, 2)),
+  dim = c(dim(betadraw_converged)[1] * dim(betadraw_converged)[3], dim(betadraw_converged)[2])
+)
+
+# Compute the mean and heterogeneity (standard deviation) across respondents
+mpref_c <- cbind(
+  colMeans(betaexchange_c),                # Mean preferences for each attribute
+  apply(betaexchange_c, 2, sd)             # Heterogeneity (SD) of preferences
+)
+
+# Assign column names
+colnames(mpref_c) <- c("Mean Preference", "Heterogeneity")
+rownames(mpref_c) <- colnames(E_Data_c$lgtdata[[1]]$X)
+
+# View the results
+print(round(mpref_c, digits = 2))
+
+
+# Compute mean preferences from the Homogeneous model
+aggregate_means <- out_logit$coefficients  # Homogeneous model posterior means
+
+# Combine respondent-level and Homogeneous-level means for comparison
+comparison <- round(cbind(
+  Mixed_Logit_Mean = mpref_c[, "Mean Preference"],  # From individual-level model
+  Homogeneous_Mean = aggregate_means                    # From homogeneous model
+), digits = 5)
+
+# View the comparison
+print(comparison)
+
+######computing posterior predictive 'counterfactual' choice probabilities######
+
+Xbeta_c = choiceset %*% t(betaexchange_c)
+logsumeXbeta_c = log(t(array(colSums(exp(Xbeta_c)), dim = c(dim(Xbeta_c)[2],dim(Xbeta_c)[1]))))
+
+windows()
+smoothScatter(Xbeta_c[1,],Xbeta_c[2,]);grid()
+abline(0,1)
+
+## choice probs 
+prob_c=rowMeans(exp(Xbeta_c-logsumeXbeta_c))
+
+cbind(choiceset,prob_c)
+
+#Comparison of Market share of alternatives across Homogeneous, Mixed Logit with and without constraint
+cbind(prob,prob_M,prob_c) 
+
+# Sample data as provided
+data <- data.frame(
+  Alternative = c("alt1", "alt2", "alt3", "outside"),
+  Multinomial = c(0.2532297, 0.2466608, 0.2507852, 0.2493243),
+  Mixed_Logit_without_constraint = c(0.2470248, 0.1876474, 0.4027213, 0.1626065),
+  Mixed_Logit_with_price_constraint = c(0.2559295, 0.2135560, 0.3574117, 0.1731029)
+)
+
+# Reshape data for ggplot
+library(reshape2)
+data_long <- melt(data, id.vars = "Alternative", 
+                  variable.name = "Model", 
+                  value.name = "Probability")
+
+# Create the bar chart
+library(ggplot2)
+ggplot(data_long, aes(x = Alternative, y = Probability, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Market Share Comparison Across Models",
+    x = "Alternatives",
+    y = "Market Share Probability",
+    fill = "Model"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
