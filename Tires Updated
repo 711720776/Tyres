@@ -43,8 +43,6 @@ countattribute <- function(Xmat, yl, p, attributerange) {
   return(out)
 }
 
-
-# Apply the functions to your dataset
 # Use E_Data_c$lgtdata and combine results across respondents
 X_all <- do.call(rbind, lapply(E_Data_c$lgtdata, function(respondent) respondent$X))
 y_all <- unlist(lapply(E_Data_c$lgtdata, function(respondent) respondent$y))
@@ -125,7 +123,6 @@ combined_probabilities <- do.call(rbind, lapply(names(all_probabilities), functi
 # Display combined table
 print(combined_probabilities)
 
-write.csv(combined_probabilities, "combined_choice_probabilities.csv", row.names = FALSE)
 
 # Subset brand probabilities
 brand_probabilities_long <- data.frame(
@@ -172,44 +169,21 @@ ggsave("choice_shares_all_attributes.png", width = 12, height = 8, dpi = 300)
 # Load the car package
 library(car)
 
-# Fit a linear model using your dataset
-lm_model <- lm(price ~ ., data = as.data.frame(E_Data_c$lgtdata[[1]]$X))
-
-# Calculate VIF for each variable in the model
-vif_values <- vif(lm_model)
-
-# View the VIF values
-print(vif_values)
-#Defining Baseline for categorical attributes (brand, review & tes
-
-# Remove baseline attributes from X for all respondents
-for (i in seq_along(E_Data_c$lgtdata)) {
-  E_Data_c$lgtdata[[i]]$X <- E_Data_c$lgtdata[[i]]$X[, -c(2, 26, 31)]   # Remove 'michelin', 'rev_1star', 'test_1star'
-}
-# Fit a linear model using your dataset to check for multicollinierity
-lm_model <- lm(price ~ ., data = as.data.frame(E_Data_c$lgtdata[[1]]$X))
-
-# Calculate VIF for each variable in the model to check for multicollinierity
-vif_values <- vif(lm_model)
-
-# View the VIF values to check for multicollinierity
-print(vif_values)
-
-# Combine all respondents' X and y into single datasets
-X_all <- do.call(rbind, lapply(E_Data_c$lgtdata, function(respondent) respondent$X))
-y_all <- unlist(lapply(E_Data_c$lgtdata, function(respondent) respondent$y))
-
-# Convert X_all to a dataframe for easy manipulation
+# Combine X_all (attributes) and y_all (choices) into one data frame
 X_all_df <- as.data.frame(X_all)
+# Recreate 'id' and 'alt'
+X_all_df$id <- rep(1:(nrow(X_all_df) / E_Data_c$p), each = E_Data_c$p)
+X_all_df$alt <- rep(1:E_Data_c$p, times = nrow(X_all_df) / E_Data_c$p)
 
-# Add the choice column to the dataset
-X_all_df$choice <- y_all
+# Correctly calculate 'choice'
+repeated_y_all <- rep(y_all, each = E_Data_c$p)  # Repeat y_all for each alternative
+X_all_df$choice <- as.numeric(X_all_df$alt == repeated_y_all)
 
-# Exclude the price column (assume price is the first column)
-X_all_df <- X_all_df[, -which(colnames(X_all_df) == "price")]
+# Validate
+cat("Sum of choices:", sum(X_all_df$choice), "\n")
+cat("Number of tasks:", nrow(X_all_df) / E_Data_c$p, "\n")
+cat("Are choices correctly assigned?", sum(X_all_df$choice) == nrow(X_all_df) / E_Data_c$p, "\n")
 
-# Load the car package
-library(car)
 
 # Fit a linear model using your dataset
 ols_model <- lm(choice ~ ., data = X_all_df)
@@ -220,30 +194,24 @@ vif_values <- vif(ols_model)
 # View the VIF values
 print(vif_values)
 
-# Linear Model after baseline  
-ols_model <- lm(choice ~ ., data = X_all_df)
+
 
 # View the summary of the regression model
 summary(ols_model)
-
-# Calculate VIF for each variable in the model again to check multicollinierity
-vif_values <- vif(ols_model)
-
-# View the VIF values
-print(vif_values)
 
 # Extract coefficients for reporting
 ols_coefficients <- summary(ols_model)$coefficients
 print(ols_coefficients)
 
+# Remove baseline attributes from X for all respondents
+for (i in seq_along(E_Data_c$lgtdata)) {
+  E_Data_c$lgtdata[[i]]$X <- E_Data_c$lgtdata[[i]]$X[, -c(2, 26, 31)]   # Remove 'michelin', 'rev_1star', 'test_1star'
+}
+
+
 # Load the package
 library(mclogit)
 
-# Combine X_all (attributes) and y_all (choices) into one data frame
-X_all_df <- as.data.frame(X_all)
-X_all_df$choice <- y_all  # Add the choice column
-X_all_df$id <- rep(1:(nrow(X_all) / E_Data_c$p), each = E_Data_c$p)  # Respondent ID
-X_all_df$alt <- rep(1:E_Data_c$p, times = nrow(X_all) / E_Data_c$p)  # Alternative ID
 
 #Multinomial Logit Model Analysis
 out_logit <- mclogit(
@@ -270,7 +238,7 @@ out_logit <- mclogit(
     grip_wet_B +
     grip_wet_C +
     grip_wet_E +
-    grip_wet_F +
+    grip_wet_F + 
     rev_2star +
     rev_3star +
     rev_4star +
@@ -455,20 +423,7 @@ prob = exp(logprob)
 
 cbind(choiceset,prob)
 
-# Combine all y vectors
-y_all <- unlist(lapply(E_Data_c$lgtdata, function(respondent_data) respondent_data$y))
-
-# Combine all X matrices
-X_all <- do.call(rbind, lapply(E_Data_c$lgtdata, function(respondent_data) respondent_data$X))
-
-# Verify dimensions
-print(length(y_all))  # Should be (number of respondents) × (tasks per respondent) = 3652 × 15
-print(dim(X_all))     # Should be length(y_all) × number of attributes = 54780 × 32 (after baseline adjustment)
-
-aligned <- nrow(X_all) == length(y_all) * E_Data_c$p
-print(aligned)  # Should return TRUE
-
-#######Mixed Logit (Hierarchical Bayesian) Model########
+#######Mixed Logit (Hierarchical Bayesian) Model without constraint########
 
 library(bayesm)
 
@@ -487,43 +442,69 @@ windows()
 plot(out_HB_covariateswithoutconst$loglike, type = "l", main = "Log-Likelihood Over Iterations",
      xlab = "Iterations", ylab = "Log-Likelihood")
 
+jpeg("log_likelihood_plot.jpg", width = 800, height = 600)
+plot(out_HB_covariateswithoutconst$loglike, type = "l",
+     main = "Log-Likelihood Over Iterations",
+     xlab = "Iterations", ylab = "Log-Likelihood")
+dev.off()
+
+price_index <- 1  # Adjust this if ?price? is actually in a different column
+# Extract all respondents, the price_index column, and all iterations
+price_draws_3D <- betadraw_converged[, price_index, ]
+
+# price_draws_3D is 2D now: [N_resp, N_iter_converged]
+# Flatten it to 1D:
+price_draws <- c(price_draws_3D)  # or as.vector(price_draws_3D)
+
+windows()
+plot(
+  density(price_draws),
+  main = "Price Parameter Density (Constrained Mixed Logit)",
+  xlab = "Price Coefficient"
+)
+grid()
+
+
+
 # Get the dimensions of beta draws
-print(dim(out_HB_covariateswithoutconst$betadraw))  # Respondents × Attributes × Iterations
+print(dim(out_HB_covariateswithoutconst$betadraw))  # Respondents ? Attributes ? Iterations
+
+window()
+
 
 # Extract posterior draws
 burn_in <- 1800  # Set burn-in period
 betadraw_converged_w <- out_HB_covariateswithoutconst$betadraw[, , (burn_in + 1):dim(out_HB_covariateswithoutconst$betadraw)[3]]
 
 # Compute posterior means across iterations for each respondent and attribute
-posterior_means_w <- apply(betadraw_converged_w, c(1, 2), mean)  # Respondents × Attributes
+posterior_means_w <- apply(betadraw_converged_w, c(1, 2), mean)  # Respondents ? Attributes
 
 summary(posterior_means_w)
 
 #Combine iterations into a single respondent-level array for betaexchange
-betaexchange <- array(
+betaexchange_w <- array(
   aperm(betadraw_converged_w, perm = c(1, 3, 2)),
   dim = c(dim(betadraw_converged_w)[1] * dim(betadraw_converged_w)[3], dim(betadraw_converged_w)[2])
 )
 
 # Compute the mean and heterogeneity (standard deviation) across respondents
-mpref <- cbind(
-  colMeans(betaexchange),                # Mean preferences for each attribute
-  apply(betaexchange, 2, sd)             # Heterogeneity (SD) of preferences
+mpref_w <- cbind(
+  colMeans(betaexchange_w),                # Mean preferences for each attribute
+  apply(betaexchange_w, 2, sd)             # Heterogeneity (SD) of preferences
 )
 
 
 # Assign column names
-colnames(mpref) <- c("Mean Preference", "SD")
-rownames(mpref) <- colnames(E_Data_c$lgtdata[[1]]$X)
+colnames(mpref_w) <- c("Mean Preference", "SD")
+rownames(mpref_w) <- colnames(E_Data_c$lgtdata[[1]]$X)
 
 # View the results
-print(round(mpref, digits = 3))
-
+print(round(mpref_w, digits = 3))
 
 
 ######computing posterior predictive 'counterfactual' choice probabilities######
 
-Xbeta_M = choiceset %*% t(betaexchange)
+Xbeta_M = choiceset %*% t(betaexchange_w)
 logsumeXbeta_M = log(t(array(colSums(exp(Xbeta_M)), dim = c(dim(Xbeta_M)[2],dim(Xbeta_M)[1]))))
 
 windows()
@@ -534,8 +515,9 @@ windows()
 smoothScatter(Xbetas[1,],Xbetas[2,]);grid()
 abline(0,1)
 
-## choice probs 
+## choice probs for Mixed Logit without Price 
 prob_M=rowMeans(exp(Xbeta_M-logsumeXbeta_M))
+
 
 #######Mixed Logit (Hierarchical Bayesian) Model with price constraint########
 
@@ -564,6 +546,13 @@ windows()
 plot(out_HB_covariates$loglike, type = "l", main = "Log-Likelihood Over Iterations",
      xlab = "Iterations", ylab = "Log-Likelihood")
 
+jpeg("log_likelihood_plot.jpg", width = 800, height = 600)
+plot(out_HB_covariates$loglike, type = "l",
+     main = "Log-Likelihood Over Iterations",
+     xlab = "Iterations", ylab = "Log-Likelihood")
+dev.off()
+
+
 # Set burn-in iteration
 burn_in <- 1800
 
@@ -571,7 +560,7 @@ burn_in <- 1800
 betadraw_converged <- out_HB_covariates$betadraw[, , (burn_in + 1):dim(out_HB_covariates$betadraw)[3]]
 
 # Check dimensions of the resulting array
-print(dim(betadraw_converged))  # Should return Respondents × Attributes × Iterations
+print(dim(betadraw_converged))  # Should return Respondents ? Attributes ? Iterations
 
 # Extract post burn-in samples
 betadraw_converged <- out_HB_covariates$betadraw[, , (burn_in + 1):dim(out_HB_covariates$betadraw)[3]]
@@ -588,23 +577,23 @@ posterior_summary <- round(cbind(Mean = overall_means, SD = overall_sds), 3)
 print(posterior_summary)
 
 #Combine iterations into a single respondent-level array for betaexchange
-betaexchange_c <- array(
+betaexchange <- array(
   aperm(betadraw_converged, perm = c(1, 3, 2)),
   dim = c(dim(betadraw_converged)[1] * dim(betadraw_converged)[3], dim(betadraw_converged)[2])
 )
 
 # Compute the mean and heterogeneity (standard deviation) across respondents
-mpref_c <- cbind(
-  colMeans(betaexchange_c),                # Mean preferences for each attribute
-  apply(betaexchange_c, 2, sd)             # Heterogeneity (SD) of preferences
+mpref <- cbind(
+  colMeans(betaexchange),                # Mean preferences for each attribute
+  apply(betaexchange, 2, sd)             # Heterogeneity (SD) of preferences
 )
 
 # Assign column names
-colnames(mpref_c) <- c("Mean Preference", "Heterogeneity")
-rownames(mpref_c) <- colnames(E_Data_c$lgtdata[[1]]$X)
+colnames(mpref) <- c("Mean Preference", "Heterogeneity")
+rownames(mpref) <- colnames(E_Data_c$lgtdata[[1]]$X)
 
 # View the results
-print(round(mpref_c, digits = 2))
+print(round(mpref, digits = 2))
 
 
 # Compute mean preferences from the Homogeneous model
@@ -612,16 +601,20 @@ aggregate_means <- out_logit$coefficients  # Homogeneous model posterior means
 
 # Combine respondent-level and Homogeneous-level means for comparison
 comparison <- round(cbind(
-  Mixed_Logit_Mean = mpref_c[, "Mean Preference"],  # From individual-level model
+  Mixed_Logit_Mean = mpref[, "Mean Preference"],  # From individual-level model
   Homogeneous_Mean = aggregate_means                    # From homogeneous model
-), digits = 5)
+), digits = 3)
 
 # View the comparison
 print(comparison)
 
+
+
+
+
 ######computing posterior predictive 'counterfactual' choice probabilities######
 
-Xbeta_c = choiceset %*% t(betaexchange_c)
+Xbeta_c = choiceset %*% t(betaexchange)
 logsumeXbeta_c = log(t(array(colSums(exp(Xbeta_c)), dim = c(dim(Xbeta_c)[2],dim(Xbeta_c)[1]))))
 
 windows()
@@ -639,10 +632,11 @@ cbind(prob,prob_M,prob_c)
 # Sample data as provided
 data <- data.frame(
   Alternative = c("alt1", "alt2", "alt3", "outside"),
-  Multinomial = c(0.2532297, 0.2466608, 0.2507852, 0.2493243),
+  Multinomial = c(0.2810137, 0.2126102, 0.3366937, 0.1696824),
   Mixed_Logit_without_constraint = c(0.2470248, 0.1876474, 0.4027213, 0.1626065),
   Mixed_Logit_with_price_constraint = c(0.2559295, 0.2135560, 0.3574117, 0.1731029)
 )
+
 
 # Reshape data for ggplot
 library(reshape2)
@@ -662,5 +656,218 @@ ggplot(data_long, aes(x = Alternative, y = Probability, fill = Model)) +
   ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# Helper function for posterior analysis
+hilfana <- function(outinput, coefnames, burnin, betadraw_converged = NULL, model_type = "default") {
+  # 1) Use provided `betadraw_converged` if available, otherwise extract from `outinput`
+  if (is.null(betadraw_converged)) {
+    betadraw <- outinput$betadraw
+  } else {
+    betadraw <- betadraw_converged
+  }
+  
+  # 2) Plot log-likelihood over iterations
+  windows()
+  plot(outinput$loglike, type = "l", main = paste("Log-Likelihood over Iterations -", model_type))
+  grid()
+  
+  # 3) Trace plots for the first 9 attributes
+  windows()
+  par(mfrow = c(3, 3))
+  num_attrs_for_plot <- min(9, length(coefnames))
+  for (i in seq_len(num_attrs_for_plot)) {
+    draws_i <- apply(betadraw[, i, ], 2, mean)
+    plot(
+      x = draws_i, type = "l",
+      ylab = coefnames[i],
+      main = paste("Trace for Attribute", i, "-", coefnames[i], "-", model_type)
+    )
+    grid()
+  }
+  
+  # 4) Extract converged draws after burn-in
+  betadrawconverged <- betadraw[, , (burnin + 1):dim(betadraw)[3]]
+  
+  # Remaining function stays unchanged...
+  # 5) Density plots, reshaping, WTP computation, etc.
+  betaexchange <- array(
+    aperm(betadrawconverged, perm = c(1, 3, 2)),
+    dim = c(
+      dim(betadrawconverged)[1] * dim(betadrawconverged)[3], 
+      dim(betadrawconverged)[2]
+    )
+  )
+  colnames(betaexchange) <- coefnames
+  
+  mpref <- cbind(
+    Mean = colMeans(betaexchange),
+    SD   = apply(betaexchange, 2, sd)
+  )
+  
+  compWTP <- round(
+    mpref / -t(array(mpref["price", ], dim = c(2, nrow(mpref)))),
+    digits = 3
+  )
+  
+  return(list(
+    betaexchange = betaexchange,
+    mpref = mpref,
+    compWTP = compWTP
+  ))
+}
+
+# Define coefnames based on your matrices
+coefnames <- names(out_logit$coefficients)
+# Execute the function for hierarchical Bayesian models
+
+
+# Mixed logit without price constraint
+hilf_HB <- hilfana(
+  outinput = out_HB_covariateswithoutconst,   # Model output
+  coefnames = coefnames,                      # Attribute names
+  burnin = 1800,                              # Burn-in period
+  betadraw_converged = betadraw_converged_w,  # Explicit posterior draws
+  model_type = "without_constraint"           # Specify the model type
+)
+
+# Mixed logit with price constraint
+hilf_constr <- hilfana(
+  outinput = out_HB_covariates,               # Model output
+  coefnames = coefnames,                      # Attribute names
+  burnin = 1800,                              # Burn-in period
+  model_type = "with_constraint"              # Specify the model type
+)
+
+
+###Price Demand Curve
+###Test for alternative 1
+
+pricedemand <- function(priceset, choiceset, betamix_unconstr, betamix_constr, out_logit) {
+  priceset <- priceset / 10  # Scale prices if required
+  
+  probab_homog <- matrix(0, nrow = nrow(priceset), ncol = nrow(choiceset))
+  probab_unconstr <- matrix(0, nrow = nrow(priceset), ncol = nrow(choiceset))
+  probab_constr <- matrix(0, nrow = nrow(priceset), ncol = nrow(choiceset))
+  
+  for (i in seq_len(nrow(priceset))) {
+    choiceset[, "price"] <- priceset[i, 1]
+    
+    ### Unconstrained Mixed Logit ###
+    Xbeta_unconstr <- sweep(choiceset %*% t(betamix_unconstr), 1, apply(choiceset %*% t(betamix_unconstr), 1, max), "-")
+    exp_Xbeta_unconstr <- exp(Xbeta_unconstr)
+    probab_unconstr[i, ] <- rowMeans(exp_Xbeta_unconstr / colSums(exp_Xbeta_unconstr))
+    
+    ### Constrained Mixed Logit ###
+    Xbeta_constr <- sweep(choiceset %*% t(betamix_constr), 1, apply(choiceset %*% t(betamix_constr), 1, max), "-")
+    exp_Xbeta_constr <- exp(Xbeta_constr)
+    probab_constr[i, ] <- rowMeans(exp_Xbeta_constr / colSums(exp_Xbeta_constr))
+    
+    ### Homogeneous Logit ###
+    Xbeta_homog <- choiceset %*% out_logit$coefficients
+    Xbeta_homog <- Xbeta_homog - max(Xbeta_homog)
+    exp_Xbeta_homog <- exp(Xbeta_homog)
+    probab_homog[i, ] <- exp_Xbeta_homog / sum(exp_Xbeta_homog)
+  }
+  
+  return(list(probab_homog = probab_homog, probab_unconstr = probab_unconstr, probab_constr = probab_constr))
+}
+
+
+# Define price set for alternative 1
+priceset <- seq(20, 100, 2)  # Sequence of price points
+priceset_1 <- cbind(priceset, rep(30, length(priceset)), rep(76, length(priceset)))
+
+outsim_1 <- pricedemand(
+  priceset = priceset_1,
+  choiceset = choiceset,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange))>.9,],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_HB$betaexchange))>.9,],
+  out_logit = out_logit
+)
+
+
+mc_1 <- 30  # Marginal cost
+
+# Multinomial Logit
+optimal_price_homog_1 <- priceset_1[, 1][which.max(outsim_1$probab_homog[, 1] * (priceset_1[, 1] - mc_1))]
+
+# Mixed Logit Without Constraint
+optimal_price_unconstr_1 <- priceset_1[, 1][which.max(outsim_1$probab_unconstr[, 1] * (priceset_1[, 1] - mc_1))]
+
+# Mixed Logit With Constraint
+optimal_price_constr_1 <- priceset_1[, 1][which.max(outsim_1$probab_constr[, 1] * (priceset_1[, 1] - mc_1))]
+
+# Print Results
+cat("Profit-maximizing price for Multinomial Logit:", optimal_price_homog_1, "\n")
+cat("Profit-maximizing price for Mixed Logit (without constraint):", optimal_price_unconstr_1, "\n")
+cat("Profit-maximizing price for Mixed Logit (with constraint):", optimal_price_constr_1, "\n")
+
+
+
+#### Define price set for second alternative
+
+# Define price set for the second alternative, keeping others constant
+priceset <- seq(20, 100, 2)  # Sequence of price points for the second alternative
+priceset_2 <- cbind(rep(55, length(priceset)), priceset, rep(76, length(priceset)))
+
+# Update the pricedemand function call
+outsim_2 <- pricedemand(
+  priceset = priceset_2,
+  choiceset = choiceset,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange))>.9,],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange))>.9,],
+  out_logit = out_logit
+)
+
+# Marginal cost
+mc_2 <- 22  # Marginal cost
+
+# Multinomial Logit for Second Alternative
+optimal_price_homog_2 <- priceset_2[, 2][which.max(outsim_2$probab_homog[, 2] * (priceset_2[, 2] - mc_2))]
+
+# Mixed Logit Without Constraint for Second Alternative
+optimal_price_unconstr_2 <- priceset_2[, 2][which.max(outsim_2$probab_unconstr[, 2] * (priceset_2[, 2] - mc_2))]
+
+# Mixed Logit With Constraint for Second Alternative
+optimal_price_constr_2 <- priceset_2[, 2][which.max(outsim_2$probab_constr[, 2] * (priceset_2[, 2] - mc_2))]
+
+# Print Results for Second Alternative
+cat("Profit-maximizing price for Multinomial Logit (Alternative 2):", optimal_price_homog_2, "\n")
+cat("Profit-maximizing price for Mixed Logit (without constraint, Alternative 2):", optimal_price_unconstr_2, "\n")
+cat("Profit-maximizing price for Mixed Logit (with constraint, Alternative 2):", optimal_price_constr_2, "\n")
+
+#### Define price set for third alternative
+
+
+# Define price set for the third alternative, keeping others constant
+priceset <- seq(20, 90, 2)  # Sequence of price points for the second alternative
+priceset_3=cbind(rep(55, length(priceset)), rep(30, length(priceset)), priceset)
+
+# Update the pricedemand function call
+outsim_3 <- pricedemand(
+  priceset = priceset_3,
+  choiceset = choiceset,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange))>.9,],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange))>.9,],
+  out_logit = out_logit
+)
+
+# Marginal cost
+mc_3 <- 42  # Marginal cost
+
+# Multinomial Logit for Second Alternative
+optimal_price_homog_3 <- priceset_3[, 3][which.max(outsim_3$probab_homog[, 3] * (priceset_3[, 3] - mc_3))]
+
+# Mixed Logit Without Constraint for Second Alternative
+optimal_price_unconstr_3 <- priceset_3[, 3][which.max(outsim_3$probab_unconstr[, 3] * (priceset_3[, 3] - mc_3))]
+
+# Mixed Logit With Constraint for Second Alternative
+optimal_price_constr_3 <- priceset_3[, 3][which.max(outsim_3$probab_constr[, 3] * (priceset_3[, 3] - mc_3))]
+
+# Print Results for Second Alternative
+cat("Profit-maximizing price for Multinomial Logit (Alternative 3):", optimal_price_homog_3, "\n")
+cat("Profit-maximizing price for Mixed Logit (without constraint, Alternative 3):", optimal_price_unconstr_3, "\n")
+cat("Profit-maximizing price for Mixed Logit (with constraint, Alternative 3):", optimal_price_constr_3, "\n")
 
 
