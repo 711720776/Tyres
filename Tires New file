@@ -434,7 +434,7 @@ cbind(choiceset,prob)
 #######Mixed Logit (Hierarchical Bayesian) Model without constraint########
 
 library(bayesm)
-
+set.seed(123)  # Ensure reproducibility
 out_HB_covariateswithoutconst <- rhierMnlRwMixture(
   Data = list(
     lgtdata = E_Data_c$lgtdata,  # All choice data
