@@ -870,4 +870,72 @@ cat("Profit-maximizing price for Multinomial Logit (Alternative 3):", optimal_pr
 cat("Profit-maximizing price for Mixed Logit (without constraint, Alternative 3):", optimal_price_unconstr_3, "\n")
 cat("Profit-maximizing price for Mixed Logit (with constraint, Alternative 3):", optimal_price_constr_3, "\n")
 
+##### Optimized function to compute market shares with numeric stabilization #####
+
+probXy <- function(betamix_unconstr, betamix_constr, out_logit, X) {
+  # Compute market shares for all three models with numerical stabilization
+  
+  ### Mixed Logit Without Constraint ###
+  Xbeta_unconstr <- X %*% t(betamix_unconstr)
+  max_util_unconstr <- apply(Xbeta_unconstr, 2, max)
+  Xbeta_unconstr <- sweep(Xbeta_unconstr, 2, max_util_unconstr, "-")
+  exp_Xbeta_unconstr <- exp(Xbeta_unconstr)
+  denom_unconstr <- colSums(exp_Xbeta_unconstr)
+  market_shares_unconstr <- rowMeans(exp_Xbeta_unconstr / denom_unconstr)
+  
+  ### Mixed Logit With Constraint ###
+  Xbeta_constr <- X %*% t(betamix_constr)
+  max_util_constr <- apply(Xbeta_constr, 2, max)
+  Xbeta_constr <- sweep(Xbeta_constr, 2, max_util_constr, "-")
+  exp_Xbeta_constr <- exp(Xbeta_constr)
+  denom_constr <- colSums(exp_Xbeta_constr)
+  market_shares_constr <- rowMeans(exp_Xbeta_constr / denom_constr)
+  
+  ### Multinomial Logit (Homogeneous) ###
+  Xbeta_homog <- X %*% out_logit$coefficients
+  max_util_homog <- max(Xbeta_homog)
+  Xbeta_homog <- Xbeta_homog - max_util_homog
+  exp_Xbeta_homog <- exp(Xbeta_homog)
+  denom_homog <- sum(exp_Xbeta_homog)
+  market_shares_homog <- exp_Xbeta_homog / denom_homog
+  
+  # Return market shares and log probabilities
+  return(list(
+    market_shares_unconstr = market_shares_unconstr,
+    market_shares_constr = market_shares_constr,
+    market_shares_homog = market_shares_homog
+  ))
+}
+
+##### Compute and round market shares #####
+
+# Apply proper filtering for extreme values based on quantiles
+filtered_unconstr <- hilf_HB$betaexchange[
+  hilf_HB$betaexchange[, 1] > quantile(hilf_HB$betaexchange[, 1], 0.01) & 
+    hilf_HB$betaexchange[, 1] < quantile(hilf_HB$betaexchange[, 1], 0.99), 
+]
+
+filtered_constr <- hilf_constr$betaexchange[
+  hilf_constr$betaexchange[, 1] > quantile(hilf_constr$betaexchange[, 1], 0.01) & 
+    hilf_constr$betaexchange[, 1] < quantile(hilf_constr$betaexchange[, 1], 0.99), 
+]
+
+# Compute market shares with numeric stabilization
+market_shares_result <- probXy(
+  betamix_unconstr = filtered_unconstr,
+  betamix_constr = filtered_constr,
+  out_logit = out_logit,
+  X = choiceset
+)
+
+# Round market shares to 2 decimal places for better readability
+rounded_market_shares <- list(
+  Homogeneous = round(market_shares_result$market_shares_homog, digits = 2),
+  Unconstrained = round(market_shares_result$market_shares_unconstr, digits = 2),
+  Constrained = round(market_shares_result$market_shares_constr, digits = 2)
+)
+
+# Print the results
+print(rounded_market_shares)
+
 
