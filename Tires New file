@@ -442,5 +442,5 @@ out_HB_covariateswithoutconst <- rhierMnlRwMixture(
     p = E_Data_c$p              # Number of alternatives per task
   ),
   Prior = list(ncomp = 1),      # No sign constraint applied
-  Mcmc = list(R = 40000, keep = 10)  # 40,000 iterations, thinning every 100
+  Mcmc = list(R = 40000, keep = 10)  # 40,000 iterations, thinning every 10
 )
