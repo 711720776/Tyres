@@ -1412,3 +1412,955 @@ print(eq_prices_result$path_eq_prices)
 # Print the convergence path of equilibrium prices
 print("Convergence Path of Equilibrium Prices:")
 print(eq_prices_result$path_eq_prices)
+
+########Market New Scenario with the introduction of a new alternative##############
+
+# Define price values for the alternatives
+alt_prices <- c(5.0, 4.5, 5.6, 4.2)  # Example prices corresponding to your summary statistics
+
+# Define alternatives using the attribute matrices
+alt1 <- c(
+  price = alt_prices[1],
+  Brands["goodyear", ],
+  Type["comfort_type", ],
+  Longevity["stand_longevity_km",],
+  Rolling[ "fuel_eff_E",],
+  Grip["grip_wet_E",],
+  Review["rev_4star",],
+  Test["test_5star",]
+)
+
+alt2 <- c(
+  price = alt_prices[2],
+  Brands["bridgestone", ],
+  Type["comfort_type", ],
+  Longevity["plus_4thou_km",],
+  Rolling["fuel_eff_F",],
+  Grip["grip_wet_F",],
+  Review["rev_5star",],
+  Test["test_4star",]
+)
+
+alt3 <- c(
+  price = alt_prices[3],
+  Brands["michelin", ],
+  Type["comfort_type", ],
+  Longevity["plus_8thou_km",],
+  Rolling["fuel_eff_B",],
+  Grip["grip_wet_B",],
+  Review["rev_3star",],
+  Test["test_3star",]
+)
+
+alt4 <- c(
+  price = alt_prices[4],
+  Brands["low_price-brand", ],
+  Type["comfort_type", ],
+  Longevity["plus_8thou_km",],
+  Rolling["fuel_eff_B",],
+  Grip["grip_wet_B",],
+  Review["rev_3star",],
+  Test["test_3star",]
+)
+
+
+
+# Outside option (all zeros, representing no selection from defined alternatives)
+alt_outside <- numeric(length(out_logit$coefficients))
+
+# Combine into a choice set
+choiceset <- rbind(alt1, alt2, alt3, alt4, alt_outside)
+
+# Set column names to match out_logit coefficients
+colnames(choiceset) <- names(out_logit$coefficients)
+
+# Set row names for alternatives
+rownames(choiceset) <- c("alt1", "alt2", "alt3", "alt4", "outside")
+
+# Print the choiceset
+print(choiceset)
+
+######computing 'counterfactual' choice probabilities given estimates from data######
+
+Xbeta = choiceset %*% out_logit$coefficients
+
+## direct 
+prob_=exp(Xbeta)/sum(exp(Xbeta))
+
+## with numerical stabilization
+Xbetas = Xbeta - max(Xbeta)
+logdenom = log(sum(exp(Xbetas)))
+logprob = Xbetas - logdenom
+prob = exp(logprob)
+
+cbind(choiceset,prob)
+
+#######Mixed Logit (Hierarchical Bayesian) Model without constraint########
+
+library(bayesm)
+
+out_HB_covariateswithoutconst <- rhierMnlRwMixture(
+  Data = list(
+    lgtdata = E_Data_c$lgtdata,  # All choice data
+    Z = E_Data_c$Z,             # Covariates
+    p = E_Data_c$p              # Number of alternatives per task
+  ),
+  Prior = list(ncomp = 1),      # No sign constraint applied
+  Mcmc = list(R = 40000, keep = 10)  # 40,000 iterations, thinning every 10
+)
+# Save the output
+save(out_HB_covariateswithoutconst, file = "C:/Users/olich/OneDrive/Desktop/Winter 24-25/CSCC/out_HB_covariateswithoutconst.RData")
+
+
+#Verify Convergence of the Model
+windows()
+plot(out_HB_covariateswithoutconst$loglike, type = "l", main = "Log-Likelihood Over Iterations",
+     xlab = "Iterations", ylab = "Log-Likelihood")
+
+jpeg("log_likelihood_plot.jpg", width = 800, height = 600)
+plot(out_HB_covariateswithoutconst$loglike, type = "l",
+     main = "Log-Likelihood Over Iterations",
+     xlab = "Iterations", ylab = "Log-Likelihood")
+dev.off()
+
+price_index <- 1  # Adjust this if ?price? is actually in a different column
+# Extract all respondents, the price_index column, and all iterations
+price_draws_3D <- betadraw_converged_w[, price_index, ]
+
+# price_draws_3D is 2D now: [N_resp, N_iter_converged]
+# Flatten it to 1D:
+price_draws <- c(price_draws_3D)  # or as.vector(price_draws_3D)
+
+windows()
+plot(
+  density(price_draws),
+  main = "Price Parameter Density (Unonstrained Mixed Logit)",
+  xlab = "Price Coefficient"
+)
+grid()
+
+
+
+# Get the dimensions of beta draws
+print(dim(out_HB_covariateswithoutconst$betadraw))  # Respondents ? Attributes ? Iterations
+
+window()
+
+
+# Extract posterior draws
+burn_in <- 1800  # Set burn-in period
+betadraw_converged_w <- out_HB_covariateswithoutconst$betadraw[, , (burn_in + 1):dim(out_HB_covariateswithoutconst$betadraw)[3]]
+
+# Compute posterior means across iterations for each respondent and attribute
+posterior_means_w <- apply(betadraw_converged_w, c(1, 2), mean)  # Respondents ? Attributes
+
+summary(posterior_means_w)
+
+#Combine iterations into a single respondent-level array for betaexchange
+betaexchange_w <- array(
+  aperm(betadraw_converged_w, perm = c(1, 3, 2)),
+  dim = c(dim(betadraw_converged_w)[1] * dim(betadraw_converged_w)[3], dim(betadraw_converged_w)[2])
+)
+
+# Compute the mean and heterogeneity (standard deviation) across respondents
+mpref_w <- cbind(
+  colMeans(betaexchange_w),                # Mean preferences for each attribute
+  apply(betaexchange_w, 2, sd)             # Heterogeneity (SD) of preferences
+)
+
+
+# Assign column names
+colnames(mpref_w) <- c("Mean Preference", "SD")
+rownames(mpref_w) <- colnames(E_Data_c$lgtdata[[1]]$X)
+
+# View the results
+print(round(mpref_w, digits = 3))
+
+
+######computing posterior predictive 'counterfactual' choice probabilities######
+
+Xbeta_M = choiceset %*% t(betaexchange_w)
+logsumeXbeta_M = log(t(array(colSums(exp(Xbeta_M)), dim = c(dim(Xbeta_M)[2],dim(Xbeta_M)[1]))))
+
+windows()
+smoothScatter(Xbeta_M[1,],Xbeta_M[2,]);grid()
+abline(0,1)
+
+windows()
+smoothScatter(Xbetas[1,],Xbetas[2,]);grid()
+abline(0,1)
+
+## choice probs for Mixed Logit without Price 
+prob_M=rowMeans(exp(Xbeta_M-logsumeXbeta_M))
+
+
+#######Mixed Logit (Hierarchical Bayesian) Model with price constraint########
+
+price_index <- which(colnames(E_Data_c$lgtdata[[1]]$X) == "price")
+print(price_index)  # Should return the column index for "price"
+
+#Introducing Price Constraint
+SignRes <- double(ncol(E_Data_c$lgtdata[[1]]$X))  # Initialize with zeros
+SignRes[price_index] <- -1  # Constrain the price coefficient to be negative
+
+
+
+library(bayesm)
+set.seed(123)  # Ensure reproducibility
+out_HB_covariates <- rhierMnlRwMixture(
+  Data = list(
+    lgtdata = E_Data_c$lgtdata,  # All choice data
+    Z = E_Data_c$Z,             # Covariates
+    p = E_Data_c$p              # Number of alternatives per task
+  ),
+  Prior = list(ncomp = 1, SignRes = SignRes),  # Apply sign constraint
+  Mcmc = list(R = 40000, keep = 10)           # 70,000 iterations, thinning every 100
+)
+# Save the output
+save(out_HB_covariates, file = "C:/Users/olich/OneDrive/Desktop/Winter 24-25/CSCC/HB_Model_with_constraints.RData")
+
+
+#Verify Convergence of the Model
+windows()
+plot(out_HB_covariates$loglike, type = "l", main = "Log-Likelihood Over Iterations",
+     xlab = "Iterations", ylab = "Log-Likelihood")
+
+jpeg("log_likelihood_plot.jpg", width = 800, height = 600)
+plot(out_HB_covariates$loglike, type = "l",
+     main = "Log-Likelihood Over Iterations",
+     xlab = "Iterations", ylab = "Log-Likelihood")
+dev.off()
+
+
+# Set burn-in iteration
+burn_in <- 1800
+
+# Extract converged iterations (from 18,000 onward)
+betadraw_converged <- out_HB_covariates$betadraw[, , (burn_in + 1):dim(out_HB_covariates$betadraw)[3]]
+
+# Check dimensions of the resulting array
+print(dim(betadraw_converged))  # Should return Respondents ? Attributes ? Iterations
+
+# Extract post burn-in samples
+betadraw_converged <- out_HB_covariates$betadraw[, , (burn_in + 1):dim(out_HB_covariates$betadraw)[3]]
+
+# Posterior means and standard deviations for each respondent and attribute
+posterior_means <- apply(betadraw_converged, c(1, 2), mean)  # Mean across iterations
+posterior_sds <- apply(betadraw_converged, c(1, 2), sd)      # SD across iterations
+
+# Overall attribute-level summaries (averaged across respondents)
+overall_means <- colMeans(posterior_means)
+overall_sds <- apply(posterior_means, 2, sd)
+posterior_summary <- round(cbind(Mean = overall_means, SD = overall_sds), 3)
+
+print(posterior_summary)
+
+#Combine iterations into a single respondent-level array for betaexchange
+betaexchange <- array(
+  aperm(betadraw_converged, perm = c(1, 3, 2)),
+  dim = c(dim(betadraw_converged)[1] * dim(betadraw_converged)[3], dim(betadraw_converged)[2])
+)
+
+# Compute the mean and heterogeneity (standard deviation) across respondents
+mpref <- cbind(
+  colMeans(betaexchange),                # Mean preferences for each attribute
+  apply(betaexchange, 2, sd)             # Heterogeneity (SD) of preferences
+)
+
+# Assign column names
+colnames(mpref) <- c("Mean Preference", "STd")
+rownames(mpref) <- colnames(E_Data_c$lgtdata[[1]]$X)
+
+# View the results
+print(round(mpref, digits = 2))
+
+
+# Compute mean preferences from the Homogeneous model
+aggregate_means <- out_logit$coefficients  # Homogeneous model posterior means
+
+# Combine respondent-level and Homogeneous-level means for comparison
+comparison <- round(cbind(
+  Mixed_Logit_Mean = mpref[, "Mean Preference"],  # From individual-level model
+  Homogeneous_Mean = aggregate_means                    # From homogeneous model
+), digits = 3)
+
+# View the comparison
+print(comparison)
+
+
+######computing posterior predictive 'counterfactual' choice probabilities######
+
+Xbeta_c = choiceset %*% t(betaexchange)
+logsumeXbeta_c = log(t(array(colSums(exp(Xbeta_c)), dim = c(dim(Xbeta_c)[2],dim(Xbeta_c)[1]))))
+
+windows()
+smoothScatter(Xbeta_c[1,],Xbeta_c[2,]);grid()
+abline(0,1)
+
+# Extract coefficients from Mixed Logit
+mixed_logit_coeffs <- comparison[, "Mixed_Logit_Mean"]
+
+# Calculate WTP (dividing each attribute by price coefficient)
+wtp_estimates <- abs(mixed_logit_coeffs) / abs(mixed_logit_coeffs["price"])
+
+# Display WTP estimates
+print(round(wtp_estimates, 2))
+
+
+## choice probs 
+prob_c=rowMeans(exp(Xbeta_c-logsumeXbeta_c))
+
+cbind(choiceset,prob_c)
+
+#Comparison of Market share of alternatives across Homogeneous, Mixed Logit with and without constraint
+cbind(prob,prob_M,prob_c) 
+
+# Load necessary libraries
+library(ggplot2)
+library(reshape2)
+library(scales)
+
+# Sample data for market shares
+data <- data.frame(
+  Alternative = c("Goodyear", "Bridgestone", "Michelin", "Low Price Brand", "Outside"),
+  Multinomial = c(0.17, 0.14, 0.41, 0.21, 0.07),
+  Mixed_Logit_without_constraint = c(0.17, 0.15, 0.39, 0.24, 0.06),
+  Mixed_Logit_with_price_constraint = c(0.16, 0.15, 0.39, 0.25, 0.05)
+)
+
+# Convert data to long format for ggplot2
+data_long <- melt(data, id.vars = "Alternative", 
+                  variable.name = "Model", 
+                  value.name = "Market_Share")  # Ensure no spaces in column names
+
+# Create the market share bar chart with customized colors
+ggplot(data_long, aes(x = Alternative, y = Market_Share, fill = Model)) +  
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), color = "black") +  # Black border
+  geom_text(aes(label = scales::percent(Market_Share, accuracy = 0.1)),  
+            position = position_dodge(width = 0.8), vjust = -0.3, size = 3, fontface = "bold") +  # Fewer decimal places
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +  # Convert y-axis to %
+  scale_fill_manual(values = c("Multinomial" = "#1b9e77", 
+                               "Mixed_Logit_without_constraint" = "#d95f02", 
+                               "Mixed_Logit_with_price_constraint" = "#7570b3")) +  # Custom colors
+  labs(title = "Market Share by Brand Across Models",
+       x = "Brand",
+       y = "Market Share (%)",
+       fill = "Model") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+        axis.text.y = element_text(size = 12),
+        legend.text = element_text(size = 12),
+        plot.title = element_text(size = 16, face = "bold"),
+        legend.title = element_text(size = 13))
+
+# Load necessary libraries
+library(ggplot2)
+library(reshape2)
+library(scales)  # For percentage formatting
+
+# Load necessary libraries
+# Load necessary libraries
+library(ggplot2)
+library(reshape2)
+library(scales)
+
+# Sample data for market shares
+data <- data.frame(
+  Alternative = c("Goodyear", "Bridgestone", "Michelin", "Low Price Brand", "Outside"),
+  Multinomial = c(0.17, 0.14, 0.41, 0.21, 0.07),
+  Mixed_Logit_without_constraint = c(0.17, 0.15, 0.39, 0.24, 0.06),
+  Mixed_Logit_with_price_constraint = c(0.16, 0.15, 0.39, 0.25, 0.05)
+)
+
+# Convert data to long format for ggplot2
+data_long <- melt(data, id.vars = "Alternative", 
+                  variable.name = "Model", 
+                  value.name = "Market_Share")
+
+# Create the improved horizontal bar chart
+p <- ggplot(data_long, aes(x = reorder(Alternative, Market_Share), y = Market_Share, fill = Model)) +  
+  geom_bar(stat = "identity", position = position_dodge(width = 0.7), color = "black", width = 0.6) +  # Wider bars
+  geom_text(aes(label = scales::percent(Market_Share, accuracy = 0.1)),  
+            position = position_dodge(width = 0.7), hjust = 1.2, size = 6, color = "white", fontface = "bold") +  # Labels inside bars
+  scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, max(data_long$Market_Share) + 0.1)) +  
+  scale_fill_manual(values = c("Multinomial" = "#1b9e77", 
+                               "Mixed_Logit_without_constraint" = "#d95f02", 
+                               "Mixed_Logit_with_price_constraint" = "#7570b3")) +  
+  labs(title = "Market Share by Brand Across Models",
+       x = NULL,  # Removes x-axis title
+       y = "Market Share (%)",
+       fill = "Model") +
+  coord_flip() +  # Flip for horizontal bars
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 18, face = "bold"),
+        legend.text = element_text(size = 16),
+        plot.title = element_text(size = 20, face = "bold"),
+        legend.title = element_text(size = 18),
+        panel.grid.major.y = element_blank())  # Remove grid lines for better clarity
+
+# Print the plot
+print(p)
+
+# Save the plot as a high-resolution wide image
+ggsave("market_share_large.png", plot = p, width = 18, height = 10, dpi = 300)
+
+
+
+
+
+
+# Helper function for posterior analysis
+hilfana <- function(outinput, coefnames, burnin, betadraw_converged = NULL, model_type = "default") {
+  # Handle different model types
+  if (model_type == "multinomial") {
+    # Directly handle multinomial logit coefficients
+    coef_summary <- summary(outinput)$coefficients
+    return(list(
+      coef_summary = coef_summary
+    ))
+  } else {
+    # Mixed logit models (with/without constraint)
+    if (is.null(betadraw_converged)) {
+      betadraw <- outinput$betadraw
+    } else {
+      betadraw <- betadraw_converged
+    }
+    
+    # Log-likelihood plot
+    windows()
+    plot(outinput$loglike, type = "l", main = paste("Log-Likelihood over Iterations -", model_type),
+         xlab = "Iterations", ylab = "Log-Likelihood")
+    grid()
+    
+    # Trace plots for first 9 attributes
+    windows()
+    par(mfrow = c(3, 3))
+    num_attrs_for_plot <- min(9, length(coefnames))
+    for (i in seq_len(num_attrs_for_plot)) {
+      draws_i <- apply(betadraw[, i, ], 2, mean)
+      plot(
+        x = draws_i, type = "l",
+        ylab = coefnames[i],
+        main = paste("Trace for Attribute", i, "-", coefnames[i], "-", model_type)
+      )
+      grid()
+    }
+    
+    # Extract converged draws
+    betadrawconverged <- betadraw[, , (burnin + 1):dim(betadraw)[3]]
+    
+    # Reshape for analysis
+    betaexchange <- array(
+      aperm(betadrawconverged, perm = c(1, 3, 2)),
+      dim = c(dim(betadrawconverged)[1] * dim(betadrawconverged)[3], dim(betadrawconverged)[2])
+    )
+    colnames(betaexchange) <- coefnames
+    
+    # Compute preferences
+    mpref <- cbind(
+      Mean = colMeans(betaexchange),
+      SD   = apply(betaexchange, 2, sd)
+    )
+    
+    # Compute willingness to pay
+    compWTP <- round(
+      mpref / -t(array(mpref["price", ], dim = c(2, nrow(mpref)))),
+      digits = 3
+    )
+    
+    return(list(
+      betaexchange = betaexchange,
+      mpref = mpref,
+      compWTP = compWTP
+    ))
+  }
+}
+
+# Example function calls for different models
+hilfana(out_logit, coefnames, burnin, model_type = "multinomial")
+hilfana(out_HB_covariateswithoutconst, coefnames, burn_in, model_type = "mixed_logit_without_constraint")
+hilfana(out_HB_covariates, coefnames, burn_in, model_type = "mixed_logit_with_constraint")
+
+# Define coefnames based on your matrices
+coefnames <- names(out_logit$coefficients)
+# Execute the function for hierarchical Bayesian models
+
+
+# Mixed logit without price constraint
+hilf_HB <- hilfana(
+  outinput = out_HB_covariateswithoutconst,   # Model output
+  coefnames = coefnames,                      # Attribute names
+  burnin = 1800,                              # Burn-in period
+  betadraw_converged = betadraw_converged_w,   # Explicit posterior draws for without constraint model
+  model_type = "without_constraint"           # Specify the model type
+)
+
+# Mixed logit with price constraint
+hilf_constr <- hilfana(
+  outinput = out_HB_covariates,               # Model output
+  coefnames = coefnames,                       # Attribute names
+  burnin = 1800,                               # Burn-in period
+  betadraw_converged = betadraw_converged,      # Explicit posterior draws for with constraint model
+  model_type = "with_constraint"               # Specify the model type
+)
+
+# Given WTP values from the previous analysis
+wtp_estimates <- c(
+  michelin = 11.90, continental = 11.08, goodyear = 11.45, bridgestone = 11.53, pirelli = 11.40,
+  kleber = 9.77, bfgoodrich = 9.78, firestone = 10.34, hankook = 10.09, `low_price-brand` = 7.83,
+  comfort_type = 0.10, sports_type = 0.47,
+  min_4thou_km = 0.18, stand_longevity_km = 2.02, plus_4thou_km = 2.30, plus_8thou_km = 3.46,
+  fuel_eff_B = 0.54, fuel_eff_C = 1.46, fuel_eff_E = 3.24, fuel_eff_F = 4.06,
+  grip_wet_B = 0.40, grip_wet_C = 1.21, grip_wet_E = 3.06, grip_wet_F = 4.16,
+  rev_1star = 0.63, rev_2star = 0.03, rev_3star = 0.95, rev_4star = 1.44, rev_5star = 2.01,
+  test_1star = 1.03, test_2star = 0.12, test_3star = 1.01, test_4star = 1.85, test_5star = 2.53
+)
+
+# Define your alternative attribute selections
+alt1_attributes <- c(
+  "goodyear", "comfort_type", "stand_longevity_km", 
+  "fuel_eff_E", "grip_wet_E", "rev_4star", "test_5star"
+)
+
+alt2_attributes <- c(
+  "bridgestone", "comfort_type", "plus_4thou_km", 
+  "fuel_eff_F", "grip_wet_F", "rev_5star", "test_4star"
+)
+
+alt3_attributes <- c(
+  "kleber", "comfort_type", "plus_8thou_km", 
+  "fuel_eff_C", "grip_wet_C", "rev_3star", "test_3star"
+)
+
+alt4_attributes <- c(
+  "low_price-brand", "comfort_type", "plus_8thou_km", 
+  "fuel_eff_B", "grip_wet_B", "rev_3star", "test_3star"
+)
+
+# Define price values for the alternatives
+alt_prices <- c(50, 45, 56, 42)  # Example prices corresponding to your summary statistics
+
+
+
+# Function to compute marginal cost
+compute_marginal_cost <- function(price, attributes, wtp_estimates) {
+  total_wtp <- sum(wtp_estimates[attributes])  # Sum WTP values for the chosen attributes
+  mc <- price - total_wtp  # Marginal cost estimation
+  return(mc)
+}
+
+# Calculate marginal costs for each alternative
+mc_alt1 <- compute_marginal_cost(alt_prices[1], alt1_attributes, wtp_estimates)
+mc_alt2 <- compute_marginal_cost(alt_prices[2], alt2_attributes, wtp_estimates)
+mc_alt3 <- compute_marginal_cost(alt_prices[3], alt3_attributes, wtp_estimates)
+mc_alt4 <- compute_marginal_cost(alt_prices[4], alt4_attributes, wtp_estimates)
+
+# Print results
+cat("Estimated Marginal Cost for Alternative 1:", round(mc_alt1, 2), "\n")
+cat("Estimated Marginal Cost for Alternative 2:", round(mc_alt2, 2), "\n")
+cat("Estimated Marginal Cost for Alternative 3:", round(mc_alt3, 2), "\n")
+cat("Estimated Marginal Cost for Alternative 4:", round(mc_alt4, 2), "\n")
+
+##### Optimized function to compute market shares with numeric stabilization #####
+# Function to compute logit market shares given preference draws representing market preferences
+
+probXy <- function(betamix_unconstr, betamix_constr, out_logit, X) {
+  # Compute market shares for all models including MNL and Mixed Logit with/without price constraint
+  
+  ### Multinomial Logit (Homogeneous) ###
+  Xbeta_homog <- X %*% out_logit$coefficients
+  max_util_homog <- max(Xbeta_homog)  # Numerical stabilization
+  Xbeta_homog <- Xbeta_homog - max_util_homog
+  exp_Xbeta_homog <- exp(Xbeta_homog)
+  market_shares_homog <- exp_Xbeta_homog / sum(exp_Xbeta_homog)
+  
+  ### Mixed Logit Without Constraint ###
+  Xbeta_unconstr <- X %*% t(betamix_unconstr)
+  max_util_unconstr <- apply(Xbeta_unconstr, 2, max)  # Max utility per respondent
+  Xbeta_unconstr <- sweep(Xbeta_unconstr, 2, max_util_unconstr, "-")  # Stabilization
+  exp_Xbeta_unconstr <- exp(Xbeta_unconstr)
+  denom_unconstr <- colSums(exp_Xbeta_unconstr)
+  market_shares_unconstr <- rowMeans(exp_Xbeta_unconstr / denom_unconstr)
+  
+  ### Mixed Logit With Constraint ###
+  Xbeta_constr <- X %*% t(betamix_constr)
+  max_util_constr <- apply(Xbeta_constr, 2, max)  # Max utility per respondent
+  Xbeta_constr <- sweep(Xbeta_constr, 2, max_util_constr, "-")  # Stabilization
+  exp_Xbeta_constr <- exp(Xbeta_constr)
+  denom_constr <- colSums(exp_Xbeta_constr)
+  market_shares_constr <- rowMeans(exp_Xbeta_constr / denom_constr)
+  
+  # Return market shares and log probabilities for all models
+  return(list(
+    market_shares_homog = market_shares_homog,
+    market_shares_unconstr = market_shares_unconstr,
+    market_shares_constr = market_shares_constr
+  ))
+}
+
+# Example usage of the probXy function
+# Run the probXy function and extract market share results
+market_shares_result <- probXy(
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset  # Use existing choice set with updated prices
+)
+
+# Extract and round each market share component separately
+rounded_market_shares <- list(
+  Homogeneous = round(market_shares_result$market_shares_homog, digits = 2),
+  Unconstrained = round(market_shares_result$market_shares_unconstr, digits = 2),
+  Constrained = round(market_shares_result$market_shares_constr, digits = 2)
+)
+
+# Print the rounded market shares
+print(rounded_market_shares)
+
+
+profitcalc <- function(price, betamix_unconstr, betamix_constr, out_logit, X, cost, bindex) {
+  # Update the price of the selected alternative
+  X[bindex, "price"] <- price
+  
+  # Calculate market shares for each model
+  market_shares <- probXy(
+    betamix_unconstr = betamix_unconstr,
+    betamix_constr = betamix_constr,
+    out_logit = out_logit,
+    X = X
+  )
+  
+  # Extract market shares for the selected alternative
+  market_share_homog <- market_shares$market_shares_homog[bindex]
+  market_share_unconstr <- market_shares$market_shares_unconstr[bindex]
+  market_share_constr <- market_shares$market_shares_constr[bindex]
+  
+  # Calculate profit for each model
+  profit_homog <- market_share_homog * (price - cost)
+  profit_unconstr <- market_share_unconstr * (price - cost)
+  profit_constr <- market_share_constr * (price - cost)
+  
+  # Return the computed profits
+  return(list(
+    profit_homog = profit_homog,
+    profit_unconstr = profit_unconstr,
+    profit_constr = profit_constr
+  ))
+}
+
+profitcalchelp <- function(price, betamix_unconstr, betamix_constr, out_logit, X, cost, bindex) {
+  # Call profitcalc and return profit for constrained model
+  result <- profitcalc(price, betamix_unconstr, betamix_constr, out_logit, X, cost, bindex)
+  return(-result$profit_constr)  # Return negative for maximization
+}
+
+# Set cost and initial price guess for alternative 1
+cost_1 <- 29.79
+initial_price <- 35  # Initial guess
+
+# Optimize the price to maximize profit for alternative 1
+optimal_result <- optim(
+  par = initial_price,  # Initial guess for price
+  fn = profitcalchelp,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_1,
+  bindex = 1,  # Index for alternative 1
+  method = "L-BFGS-B",  # Bounded optimization
+  lower = 35,  # Lower bound on price
+  upper = 100  # Upper bound on price
+)
+
+# Extract and print the optimal price
+optimal_price_alt1 <- optimal_result$par
+cat("Optimal price for alternative 1:", round(optimal_price_alt1, 2), "\n")
+
+# Calculate the final profit and market share at the optimal price
+final_profit <- profitcalc(
+  price = optimal_price_alt1,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_1,
+  bindex = 1
+)
+
+cat("Profit for alternative 1 at optimal price:", round(final_profit$profit_constr, 2), "\n")
+
+# Set cost and initial price guess for alternative 1
+cost_1 <- 29.79
+initial_price <- 35  # Initial guess
+
+# Optimize the price to maximize profit for alternative 1
+optimal_result <- optim(
+  par = initial_price,  # Initial guess for price
+  fn = profitcalchelp,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_1,
+  bindex = 1,  # Index for alternative 1
+  method = "L-BFGS-B",  # Bounded optimization
+  lower = 35,  # Lower bound on price
+  upper = 100  # Upper bound on price
+)
+
+# Extract and print the optimal price
+optimal_price_alt1 <- optimal_result$par
+cat("Optimal price for alternative 1:", round(optimal_price_alt1, 2), "\n")
+
+# Calculate the final profit and market share at the optimal price
+final_profit <- profitcalc(
+  price = optimal_price_alt1,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_1,
+  bindex = 1
+)
+
+cat("Profit for alternative 1 at optimal price:", round(final_profit$profit_constr, 2), "\n")
+
+profitcalc <- function(price, betamix_unconstr, betamix_constr, out_logit, X, cost, bindex) {
+  # Update the price of the selected alternative
+  X[bindex, "price"] <- price
+  
+  # Calculate market shares for each model
+  market_shares <- probXy(
+    betamix_unconstr = betamix_unconstr,
+    betamix_constr = betamix_constr,
+    out_logit = out_logit,
+    X = X
+  )
+  
+  # Extract market shares for the selected alternative (alternative 2)
+  market_share_homog <- market_shares$market_shares_homog[bindex]
+  market_share_unconstr <- market_shares$market_shares_unconstr[bindex]
+  market_share_constr <- market_shares$market_shares_constr[bindex]
+  
+  # Calculate profit for each model
+  profit_homog <- market_share_homog * (price - cost)
+  profit_unconstr <- market_share_unconstr * (price - cost)
+  profit_constr <- market_share_constr * (price - cost)
+  
+  # Return the computed profits
+  return(list(
+    profit_homog = profit_homog,
+    profit_unconstr = profit_unconstr,
+    profit_constr = profit_constr
+  ))
+}
+
+profitcalchelp <- function(price, betamix_unconstr, betamix_constr, out_logit, X, cost, bindex) {
+  # Call profitcalc and return profit for constrained model
+  result <- profitcalc(price, betamix_unconstr, betamix_constr, out_logit, X, cost, bindex)
+  return(-result$profit_constr)  # Return negative for maximization
+}
+
+# Set cost and initial price guess for alternative 2
+cost_2 <- 26.29  # Example cost for alternative 2
+initial_price_2 <- 30  # Initial guess
+
+# Optimize the price to maximize profit for alternative 2
+optimal_result_2 <- optim(
+  par = initial_price_2,  # Initial guess for price
+  fn = profitcalchelp,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_2,
+  bindex = 2,  # Index for alternative 2
+  method = "L-BFGS-B",  # Bounded optimization
+  lower = 30,  # Lower bound on price
+  upper = 100  # Upper bound on price
+)
+
+# Extract and print the optimal price for alternative 2
+optimal_price_alt2 <- optimal_result_2$par
+cat("Optimal price for alternative 2:", round(optimal_price_alt2, 2), "\n")
+
+# Calculate the final profit and market share at the optimal price
+final_profit_2 <- profitcalc(
+  price = optimal_price_alt2,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_2,
+  bindex = 2
+)
+
+cat("Profit for alternative 2 at optimal price:", round(final_profit_2$profit_constr, 2), "\n")
+
+
+
+# Set cost and initial price guess for alternative 3
+cost_3 <- 40.37  # Example cost for alternative 3
+initial_price_3 <- 45  # Initial guess
+
+# Optimize the price to maximize profit for alternative 3
+optimal_result_3 <- optim(
+  par = initial_price_3,  # Initial guess for price
+  fn = profitcalchelp,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_3,
+  bindex = 3,  # Index for alternative 3
+  method = "L-BFGS-B",  # Bounded optimization
+  lower = 45,  # Lower bound on price
+  upper = 100  # Upper bound on price
+)
+
+# Extract and print the optimal price for alternative 3
+optimal_price_alt3 <- optimal_result_3$par
+cat("Optimal price for alternative 3:", round(optimal_price_alt3, 2), "\n")
+
+# Calculate the final profit and market share at the optimal price
+final_profit_3 <- profitcalc(
+  price = optimal_price_alt3,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_3,
+  bindex = 3
+)
+
+cat("Profit for alternative 3 at optimal price:", round(final_profit_3$profit_constr, 2), "\n")
+
+
+# Set cost and initial price guess for alternative 4
+cost_4 <- 27.71  # Example cost for alternative 4
+initial_price_4 <- 32  # Initial guess
+
+# Optimize the price to maximize profit for alternative 3
+optimal_result_4 <- optim(
+  par = initial_price_4,  # Initial guess for price
+  fn = profitcalchelp,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_4,
+  bindex = 4,  # Index for alternative 3
+  method = "L-BFGS-B",  # Bounded optimization
+  lower = 32,  # Lower bound on price
+  upper = 100  # Upper bound on price
+)
+
+# Extract and print the optimal price for alternative 3
+optimal_price_alt4 <- optimal_result_4$par
+cat("Optimal price for alternative 4:", round(optimal_price_alt4, 2), "\n")
+
+# Calculate the final profit and market share at the optimal price
+final_profit_4 <- profitcalc(
+  price = optimal_price_alt4,
+  betamix_unconstr = hilf_HB$betaexchange[runif(nrow(hilf_HB$betaexchange)) > 0.7, ],
+  betamix_constr = hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange)) > 0.7, ],
+  out_logit = out_logit,
+  X = choiceset,
+  cost = cost_4,
+  bindex = 4
+)
+
+cat("Profit for alternative 3 at optimal price:", round(final_profit_4$profit_constr, 2), "\n")
+
+
+
+
+
+
+
+
+
+
+
+source("functions_rm_v5_Product_Portfolio_outside_fixcomp.R")
+
+
+betamix=hilf_constr$betaexchange[runif(nrow(hilf_constr$betaexchange))>.7,]
+
+choiceset_ = rbind(alt1,alt2,alt3,alt4, alt_outside)
+nplayers=nrow(choiceset_)-1
+# Define cost structure for each alternative
+costBase <- c(29.79, 26.29, 40.37, 27.71, 0)  # Costs for alternatives 1, 2, 3, 4 and outside option
+
+# Define initial starting prices for the alternatives
+startingPrices <- c(35, 30, 45, 30, 0)  # Initial price guesses for alternatives 1, 2, 3, and outside option
+
+computeProfit <- function(design, prices, beta, costs, FC = FALSE, outside = FALSE) {
+  # Extract price coefficient
+  price_coeff <- beta[, 1, drop = FALSE]  # Ensure correct indexing of price coefficient
+  beta_without_price <- beta[, -1, drop = FALSE]  # Remove price coefficient
+  
+  # Corrected utility computation
+  xbeta <- beta_without_price %*% t(design[, -1]) + price_coeff %*% t(prices)
+  
+  # Apply numerical stabilization to avoid overflow/underflow
+  max_xbeta <- apply(xbeta, 1, max)
+  xbeta_stabilized <- sweep(xbeta, 1, max_xbeta, "-")
+  probabilities <- exp(xbeta_stabilized) / rowSums(exp(xbeta_stabilized))
+  
+  # Compute net price contribution
+  net_price <- pmax(prices - costs, 0)
+  
+  # Compute profit and demand
+  profits <- colMeans(probabilities) * net_price
+  demand <- colMeans(probabilities)
+  
+  return(list(profits = profits, demand = demand))
+}
+
+
+
+# Re-run the computeProfit function with adjusted beta
+atbase <- computeProfit(
+  design = choiceset_,  
+  prices = startingPrices,  
+  beta = betamix,  
+  costs = costBase,  
+  FC = FALSE  
+)
+
+print("Profit and Demand at Initial Prices:")
+print(atbase)
+
+pr_range_mat <- t(array(c(10, 90, 10, 90, 10, 90, 10, 90, 0, 0), dim = c(2, 4)))
+
+eq_prices_result <- nashEquilibrium(
+  design = choiceset_, 
+  startingPrices = startingPrices, 
+  costs = costBase, 
+  beta = betamix, 
+  priceRange = pr_range_mat, 
+  grp = 1:nplayers,  
+  FC = FALSE, 
+  outside = FALSE, 
+  freeze = c()
+)
+
+print("Equilibrium Prices:")
+print(eq_prices_result$eq_prices)
+
+# Convergence path
+print("Convergence Path of Equilibrium Prices:")
+print(eq_prices_result$path_eq_prices)
+
+# Print the convergence path of equilibrium prices
+print("Convergence Path of Equilibrium Prices:")
+print(eq_prices_result$path_eq_prices)
+
+hist(betamix_adj[, "price"], breaks = 50, main = "Price Coefficient Distribution", xlab = "Price Coefficient")
+
+
+
+
